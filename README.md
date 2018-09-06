@@ -20,5 +20,7 @@ stack exec bombsquad
 ## Controls
 
 Space  - place bomb
+
 WASD   - move
+
 Arrows - change sight direction
