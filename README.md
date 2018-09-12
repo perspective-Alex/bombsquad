@@ -4,6 +4,8 @@
 
 All textures were taken from [https://opengameart.org/](https://opengameart.org/), details in "image" directory
 
+![BombSquad](images/bombsquad.gif)
+
 ## Build
 
 Using [Stack Utility](https://docs.haskellstack.org/en/stable/README/)
