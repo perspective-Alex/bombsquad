@@ -53,7 +53,7 @@ windowHeight = worldHeight * heightOfWallTexture
 
 
 worldWidth :: Int
-worldWidth = 10
+worldWidth = 15
 
 worldHeight :: Int
 worldHeight = 10
@@ -71,7 +71,14 @@ blankWorld :: World
 blankWorld = World [] [[Blank]]
 
 basicEnemyVelocity :: (Fractional a) => a
-basicEnemyVelocity = 2
+basicEnemyVelocity = 3
 
 bgColor :: Color
 bgColor = mixColors 0.38 0.62 white yellow
+
+labyrinth :: [CellCoord]
+labyrinth = [(x,y) |
+    x <- [2,4..worldWidth - 3], y <- [2,4..worldHeight - 3]]
+
+explRadius :: Int
+explRadius = 2

@@ -2,6 +2,7 @@ module Game where
 
 import Graphics.Gloss.Data.Bitmap
 import Graphics.Gloss.Interface.Pure.Game
+import Data.List (intersect)
 
 import Data
 
@@ -15,7 +16,7 @@ worldPic (World f
             [[ctx],
              [wtx,dwtx],
              [hDowntx,hUptx,hLefttx,hRighttx],
-             [etx],
+             [eDowntx,eUptx,eLefttx,eRighttx],
              [b1tx,b2tx,b3tx]]
          ) =
   Pictures [field,grid] 
@@ -33,7 +34,10 @@ worldPic (World f
           Hero SDUp      -> objPic xy hUptx
           Hero SDLeft    -> objPic xy hLefttx
           Hero SDRight   -> objPic xy hRighttx
-          _  -> objPic xy etx
+          Enemy SDDown _   -> objPic xy eDowntx
+          Enemy SDUp _     -> objPic xy eUptx
+          Enemy SDLeft _   -> objPic xy eLefttx
+          Enemy SDRight _   -> objPic xy eRighttx
       grid = Pictures $ map (\c -> objPic c ctx) allCells
       allCells = [(x,y) |
                   x <- [0..worldWidth - 1], y <- [0..worldHeight - 1]]
@@ -105,7 +109,10 @@ handleEvents event w =
 
 updateScreen :: Float -> World -> World
 updateScreen time w =
-  w { field = updateEnemies time $ execBooms $ updateBombs time (field w) }
+  w { field = updateEnemies time bombs
+              $ execBooms $ updateBombs time (field w) }
+  where
+    bombs = findBombs $ field w
 
 
 --updateScreen :: Float -> World -> World
@@ -137,7 +144,10 @@ initWorld = do
                     "./images/guy_up.bmp", 
                     "./images/guy_left.bmp", 
                     "./images/guy_right.bmp"]
-    ; enemyImages = ["./images/2guy_down.bmp"]
+    ; enemyImages = ["./images/2guy_down.bmp",
+                    "./images/2guy_up.bmp", 
+                    "./images/2guy_left.bmp", 
+                    "./images/2guy_right.bmp"]
     ; bombImages  = ["./images/bomb1.bmp","./images/bomb2.bmp",
                      "./images/bomb3.bmp"]
     }
@@ -150,14 +160,17 @@ initWorld = do
    [cellPictures,wallPictures,heroPictures,enemyPictures,bombPictures]
 
 initField :: [Cell]
-initField = walls ++ [hero,enemy]
+initField = allWalls ++ [hero,enemy1,enemy2]
   where
     wCoords = [(x,y) | x <- [0..worldWidth - 1], y <- [0..worldHeight - 1],
                       x == 0 || y == 0 ||
                       x == worldWidth - 1 || y == worldHeight - 1]
     walls = map (\c -> (Wall,c)) wCoords
+    dWalls = map (\c -> (DesWall,c)) labyrinth
+    allWalls = walls ++ dWalls
     hero = (Hero SDDown, (1,1))
-    enemy = (Enemy SDDown 0.0, (worldWidth - 2,worldHeight - 2))
+    enemy1 = (Enemy SDDown 0.0, (worldWidth - 2,worldHeight - 2))
+    enemy2 = (Enemy SDDown 0.0, (worldWidth - 2,1))
 
 freeCell :: CellCoord -> [Cell] -> Bool
 freeCell (x,y) field = not $ (x,y) `elem` coords 
@@ -176,22 +189,29 @@ moveEnemy :: CellCoord -> CellCoord -> [Cell] -> [Cell]
 moveEnemy _ _ [] = []
 moveEnemy newCC oldCC (x@(go,cc):xs) =
   if cc == oldCC
-  then (Enemy newSD 0.0, newCC) : moveEnemy newCC oldCC xs
+  then if (dX,dY) == (0,0)
+       then (go {eDelta = 0.0}, oldCC) : xs
+       else (Enemy newSD 0.0, newCC) : xs
   else x : moveEnemy newCC oldCC xs
     where
       (dX,dY) = (fst newCC - fst oldCC, snd newCC - snd oldCC)
       newSD = if dX == 0
-              then if dY < 0
+              then if dY <= 0
                    then SDDown
                    else SDUp
               else if dX < 0
                    then SDLeft
                    else SDRight
 
--- | find cells which take place near the given one in square 3x3
+-- | find cells which take place near the given one (distance <= 2)
 aroundCell :: CellCoord -> [Cell] -> [CellCoord]
 aroundCell (x1,y1) field = map (snd) $
   filter (\(go,(x2,y2)) -> (abs (x2 - x1) + abs (y2 - y1)) <= 2) field
+
+-- | find cells which take place near the given one (distance <= 3)
+aroundCelld3 :: CellCoord -> [Cell] -> [CellCoord]
+aroundCelld3 (x1,y1) field = map (snd) $
+  filter (\(go,(x2,y2)) -> (abs (x2 - x1) + abs (y2 - y1)) <= 3) field
 
 --------------------------------HERO---------------------------------------
 lookupHero :: [Cell] -> Maybe CellCoord 
@@ -261,17 +281,25 @@ execBooms :: [Cell] -> [Cell]
 execBooms [] = []
 execBooms field = executeBooms (findExplosions field) field
   where
-    findExplosions field =
-      map (snd) $ filter (\(go,_) -> case go of
-                                        Bomb curt BBoom -> curt >= 0.5
-                                        _ -> False ) field
     executeBooms :: [CellCoord] -> [Cell] -> [Cell]
     executeBooms [] f = f
     executeBooms (c:cs) field = executeBooms cs (execOneBoom c field)
 
     execOneBoom (x1,y1) field =
       filter (\(go,(x2,y2)) ->
-        (abs (x2 - x1) + abs (y2 - y1)) > 2 || go == Wall) field
+        (abs (x2 - x1) + abs (y2 - y1)) > explRadius || go == Wall) field
+
+
+findExplosions :: [Cell] -> [CellCoord]
+findExplosions field =
+  map (snd) $ filter (\(go,_) -> case go of
+                                   Bomb curt BBoom -> curt >= 0.5
+                                   _ -> False ) field
+findBombs :: [Cell] -> [CellCoord]
+findBombs field =
+  map (snd) $ filter (\(go,_) -> case go of
+                                   Bomb curt _ -> True 
+                                   _ -> False ) field
 
 -------------------------------ENEMY---------------------------------------
 
@@ -282,11 +310,14 @@ getEnemiesCoordsAndDeltas field = map (\(g,cc) -> (eDelta g, cc)) $
                       _ -> False
          ) field
 
-updateEnemies :: Float -> [Cell] -> [Cell]
-updateEnemies delta field = 
+updateEnemies :: Float
+              -> [CellCoord] -- ^ coordinates of bombs
+              -> [Cell]
+              -> [Cell]
+updateEnemies delta bc field = 
   case (lookupHero field) of
     Nothing -> field
-    Just hcc -> updEnemies (hcc)
+    Just hcc -> updEnemies (hcc) bc
                   (getEnemiesCoordsAndDeltas field) (incEnemiesDelta field)
   where
     incEnemiesDelta =
@@ -294,33 +325,54 @@ updateEnemies delta field =
                         Enemy sd d -> (Enemy sd (d+delta), cc)
                         _ -> (go,cc)) 
     updEnemies :: CellCoord
+               -> [CellCoord]
                -> [(Float, CellCoord)]
                -> [Cell]
                -> [Cell]
-    updEnemies _ [] field = field
-    updEnemies hcc (c:cs) field = updEnemies hcc cs
-                                    (updOneEnemy hcc c field)
+    updEnemies _ _ [] field = field
+    updEnemies hcc bc (c:cs) field = updEnemies hcc bc cs
+                                    (updOneEnemy hcc bc c field)
 
-    updOneEnemy (hX,hY) (t,ecc@(eX,eY)) field =
+    updOneEnemy (hX,hY) bc (t,ecc@(eX,eY)) field =
       if distance >= 1.0 
-      then moveEnemy newCC ecc field
+      then if nearBombs == []
+           then moveEnemy newCC ecc field
+           else moveEnemy backWayCC ecc field
       else field
         where
           distance = basicEnemyVelocity * t
           step = round distance
-          (dx,dy) = (hX - eX, hY - eY)
-          newCC = if abs dx > abs dy
-                  then if dx < 0
+          (d1x,d1y) = (hX - eX, hY - eY)
+          newCC = if abs d1x > abs d1y
+                  then if d1x < 0
                        then if freeCell (eX - step, eY) field
                             then (eX - step, eY)
                             else (eX,eY)
                        else if freeCell (eX + step, eY) field
                             then (eX + step, eY)
                             else (eX,eY)
-                  else if dy < 0
+                  else if d1y <= 0
                        then if freeCell (eX, eY - step) field
                             then (eX, eY - step)
                             else (eX,eY)
                        else if freeCell (eX, eY + step) field
                             then (eX, eY + step)
                             else (eX,eY)
+          nearBombs = intersect bc (aroundCelld3 ecc field)
+          (fbX,fbY) = head nearBombs
+          (d2x,d2y) = (fbX - eX, fbY - eY)
+          backWayCC = if abs d2x > abs d2y
+                      then if d2x < 0
+                           then if freeCell (eX + step, eY) field
+                                then (eX + step, eY)
+                                else (eX,eY)
+                           else if freeCell (eX - step, eY) field
+                                then (eX - step, eY)
+                                else (eX,eY)
+                      else if d2y <= 0
+                           then if freeCell (eX, eY + step) field
+                                then (eX, eY + step)
+                                else (eX,eY)
+                           else if freeCell (eX, eY - step) field
+                                then (eX, eY - step)
+                                else (eX,eY)
